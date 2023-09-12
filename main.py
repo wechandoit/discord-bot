@@ -1,10 +1,14 @@
 # the os module helps us access environment variables
 # i.e., our API keys
 import os
+from dotenv import load_dotenv
 
 # the Discord Python API
 import nextcord as discord
 from nextcord.ext import commands
+
+# mongodb
+from pymongo.mongo_client import MongoClient
 
 # web scraping
 from aiohttp import request
@@ -32,9 +36,11 @@ from nltk.corpus import stopwords
 # sentiment analysis
 from textblob import TextBlob
 
-matches = []
 nest_asyncio.apply()
 sns.set_theme()
+
+load_dotenv()
+TOKEN = os.getenv('DISCORD_TOKEN')
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -46,8 +52,6 @@ GUILD_IDS = (
     else discord.utils.MISSING
 )
 
-vlrggapi_url = 'https://vlrggapi.vercel.app/match/results'
-vlrggapi_url_live = 'https://vlrggapi.vercel.app/match/upcoming'
 PROFANE_WORDS_URL = 'https://raw.githubusercontent.com/zacanger/profane-words/master/words.json'
 
 profane_words = requests.get(PROFANE_WORDS_URL).json()
@@ -55,271 +59,58 @@ profane_words_regex = f'(?<![a-zA-Z0-9])({"|".join(profane_words)})(?![a-zA-Z0-9
 
 nltk.download('punkt')
 nltk.download('stopwords')
-
 stopwords.words("english")[:10] # <-- import the english stopwords
-            
 
-@client.event
-async def on_ready():
-    print('------')
-    print(f'Logged in as {client.user.name}')
-    print(client.user.id)
-    print(f'In {len(client.guilds)} servers')
-    print('------')
-    
-    await client.change_presence(activity=None)
-    
-@client.slash_command(description='Get information on recent valorant esports games', guild_ids=GUILD_IDS)
-async def recent_matches(ctx, max: int = 5):
-    
-    max_search = 0
-    
-    async with request('GET', vlrggapi_url, headers={}) as response:
-            if response.status == 200:
-                    data = await response.json()
-                    
-                    max_search = len(data['data']['segments'])
-                    if isinstance(max, int):
-                        max_search = min(len(data['data']['segments']), int(max))
+### MONGODB SETUP
 
-                    for item in data['data']['segments']:
-                        if 'Champions Tour 2023' in item['tournament_name'] or 'North America' in item['tournament_name']:
-                            team1 = item['team1']
-                            team2 = item['team2']
-                            score1 = int(item['score1'])
-                            score2 = int(item['score2'])
-                            tournament_icon = item['tournament_icon']
-                            tournament_name = item['tournament_name'] + item['round_info']
-                            
-                            current_match = {
-                                'team1': team1,
-                                'team2': team2,
-                                'score1': score1,
-                                'score2': score2,
-                                'tournament_icon': tournament_icon,
-                                'tournament_name': tournament_name
-                            }
-                            
-                            if not (current_match in matches):
-                                matches.append(current_match)
-                                
-    for i in range(max_search):
-        
-        match = matches[i]
-        
-        team1 = match['team1']
-        team2 = match['team2']
-        score1 = match['score1']
-        score2 = match['score2']
-        tournament_icon = match['tournament_icon']
-        tournament_name = match['tournament_name']
-                    
-        score = f'{score1}-{score2}'
-        embed=discord.Embed(description=f'**Team 1:** {team1}\n**Team 2:** {team2}\n**Score:** {score}', color=0x36ecc8)
-        embed.set_author(name=f'{tournament_name}', icon_url=f'{tournament_icon}')
-                 
-        await ctx.send(embed=embed)
-        await asyncio.sleep(1)
-                    
-@client.slash_command(description='Get information on live valorant esports games', guild_ids=GUILD_IDS)
-async def live_matches(ctx, max: int = 5):
+uri = os.getenv('MONGODB_URI')
+mongo = MongoClient(uri)
+try:
+    mongo.admin.command('ping')
+    print("Pinged your deployment. You successfully connected to MongoDB!")
+except Exception as e:
+    print(e)      
     
-    live_matches = []
-    
-    async with request('GET', vlrggapi_url_live, headers={}) as response:
-            if response.status == 200:
-                    data = await response.json()
-                    count = 0
-
-                    for item in data['data']['segments']:
-                        if item['time_until_match'] == 'LIVE' and ('Champions Tour 2023' in item['tournament_name'] or 'North America' in item['tournament_name']):
-                            team1 = item['team1']
-                            team2 = item['team2']
-                            
-                            try:
-                                score1 = int(item['score1'])
-                            except ValueError:
-                                score1 = 0
-                            try:
-                                score2 = int(item['score2'])
-                            except ValueError:
-                                score2 = 0
-                            tournament_icon = item['tournament_icon']
-                            tournament_name = item['tournament_name'] + ' ' + item['round_info']
-                            
-                            current_match = {
-                                'team1': team1,
-                                'team2': team2,
-                                'score1': score1,
-                                'score2': score2,
-                                'tournament_icon': tournament_icon,
-                                'tournament_name': tournament_name
-                            }
-                            
-                            if not (current_match in live_matches):
-                                live_matches.append(current_match)
-                            
-                            count += 1
-    
-    count = min(count, int(max))
-    
-    if len(live_matches) > 0:           
-        for i in range(count):
-            
-            match = live_matches[i]
-            
-            team1 = match['team1']
-            team2 = match['team2']
-            score1 = match['score1']
-            score2 = match['score2']
-            tournament_icon = match['tournament_icon']
-            tournament_name = match['tournament_name']
-                        
-            score = f'{score1}-{score2}'
-            embed=discord.Embed(description=f'**Team 1:** {team1}\n**Team 2:** {team2}\n**Score:** {score}', color=0x36ecc8)
-            embed.set_author(name=f'{tournament_name}', icon_url=f'{tournament_icon}')
-                    
-            await ctx.send(embed=embed)
-            await asyncio.sleep(1)
-    else:
-        await ctx.send('There are no live matches right now.')
-
-@client.slash_command(description='Get information on upcoming valorant esports games', guild_ids=GUILD_IDS)
-async def upcoming_matches(ctx, max: int = 5):
-    
-    upcoming_matches = []
-    
-    async with request('GET', vlrggapi_url_live, headers={}) as response:
-            if response.status == 200:
-                    data = await response.json()
-                    count = 0
-
-                    for item in data['data']['segments']:
-                        if item['time_until_match'] != 'LIVE' and ('Champions Tour 2023' in item['tournament_name'] or 'North America' in item['tournament_name']):
-                            team1 = item['team1']
-                            team2 = item['team2']
-                            
-                            try:
-                                score1 = int(item['score1'])
-                            except ValueError:
-                                score1 = 0
-                            try:
-                                score2 = int(item['score2'])
-                            except ValueError:
-                                score2 = 0
-                            tournament_icon = item['tournament_icon']
-                            tournament_name = item['tournament_name'] + ' ' + item['round_info']
-                            
-                            current_match = {
-                                'team1': team1,
-                                'team2': team2,
-                                'score1': score1,
-                                'score2': score2,
-                                'tournament_icon': tournament_icon,
-                                'tournament_name': tournament_name
-                            }
-                            
-                            if not (current_match in upcoming_matches):
-                                upcoming_matches.append(current_match)
-                            
-                            count += 1
-    
-    count = min(count, int(max))
-    
-    if len(upcoming_matches) > 0:           
-        for i in range(count):
-            
-            match = upcoming_matches[i]
-            
-            team1 = match['team1']
-            team2 = match['team2']
-            score1 = match['score1']
-            score2 = match['score2']
-            tournament_icon = match['tournament_icon']
-            tournament_name = match['tournament_name']
-                        
-            score = f'{score1}-{score2}'
-            embed=discord.Embed(description=f'**Team 1:** {team1}\n**Team 2:** {team2}\n**Score:** {score}', color=0x36ecc8)
-            embed.set_author(name=f'{tournament_name}', icon_url=f'{tournament_icon}')
-                    
-            await ctx.send(embed=embed)
-            await asyncio.sleep(1)
-    else:
-        await ctx.send('There are no live matches right now.')
-
-@client.slash_command(description='Get valorant stats on a player', guild_ids=GUILD_IDS)
-async def val_stats(ctx, player):
-    
-    
-    player_name = player.split('#')[0]
-    player_tag = player.split('#')[1]
-    region, card_pfp_url = '', ''
-    account_level = 0
-
-    account_data_url = f'https://api.henrikdev.xyz/valorant/v1/account/{player_name}/{player_tag}'
-    async with request('GET', account_data_url, headers={}) as response:
-        if response.status == 200:
-            data = await response.json()
-            data = data['data']
-            
-            region = data['region'].upper()
-            account_level = int(data['account_level'])
-            card_pfp_url = data['card']['small']
-            
-            print(player, region)
-    
-    mmr_data_url = f'https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{player_name}/{player_tag}'
-    async with request('GET', mmr_data_url, headers={}) as response:
-        if response.status == 200:
-            data = await response.json()
-            data = data['data']
-            
-            try:
-                account_rank = data['currenttierpatched']
-                account_rank_url = data['images']['small']
-                account_rr = data['ranking_in_tier']
-                last_game_rr = data['mmr_change_to_last_game']
-                elo = data['elo']
-            except Exception:
-                account_rank = 'Not Ranked'
-                account_rank_url = None
-                account_rr = 0
-                last_game_rr = 0
-                elo = 0
-                
-            embed=discord.Embed(description=f'**Rank:** {account_rank}\n**RR:** {account_rr}/100\n**ELO:** {elo}\n**Level:** {account_level}\n**Last Game:** {last_game_rr}rr', color=0x36ecc8)
-            
-            if account_rank_url:
-                embed.set_author(name=f'{player} ({region})', icon_url=f'{account_rank_url}')
-            else:
-                embed.set_author(name=f'{player} ({region})')
-            
-            embed.set_thumbnail(url=f'{card_pfp_url}')
-            await ctx.send(embed=embed)
-            
 @client.event
 async def on_message(message):
-    if os.path.isfile(f'{message.channel.id}.csv'):
-        with open(f'{message.channel.id}.csv', 'a+') as file:
+    if f'{message.channel.id}' in mongo.list_database_names():
             
-            lines = len(pd.read_csv(f'{message.channel.id}.csv'))
+        line_df = pd.DataFrame({
+            'Contents' : message.content.replace(',','').replace('\n', ' '),
+            'Author' : message.author.id,
+            'Timestamp' : message.created_at,
+            'ContentsLength' : len(message.content)
+        }, index=[0])
             
-            message_content = message.content.replace(',','').replace('\n', ' ')
-            
-            if len(message.content) > 0:
-                file.write(f'{lines},{message_content},{message.author.id},{message.created_at},{len(message.content)}\n')
-            file.close()
-            
+        # clean data and find the polarity/sentiment of the cleaned data
+        line_df['Cleaned'] = line_df['Contents'].apply(lambda x: preprocess_text(x, remove_stopwords=True))
+        line_df['Polarity'] = line_df['Cleaned'].apply(getPolarity)
+        line_df['Sentiment'] = line_df['Polarity'].apply(getAnalysis)
+        
+        # save to mongodb
+        db = mongo[f'{message.channel.id}']
+        db.Iris.insert_many(line_df.to_dict("records"))
+        
+        # print(f"Logged message: {str(message.content)} into db {message.channel.id}")
+                   
 @client.slash_command(description='Load channel into db', guild_ids=GUILD_IDS)
 async def log_channel(ctx):
     await ctx.response.defer()
     try:
-        if os.path.isfile(f'{ctx.channel.id}.csv'):
+        if f'{ctx.channel.id}' in mongo.list_database_names():
             await ctx.followup.send('This channel has been logged already!')
         else:
             messages, elapsed_time, contents, df = load_messages_to_df(ctx)
             combined_df = contents.join(df)
-            combined_df.to_csv(f'{ctx.channel.id}.csv')
+            
+            # clean data and find the polarity/sentiment of the cleaned data
+            combined_df['Cleaned'] = combined_df['Contents'].apply(lambda x: preprocess_text(x, remove_stopwords=True))
+            combined_df['Polarity'] = combined_df['Cleaned'].apply(getPolarity)
+            combined_df['Sentiment'] = combined_df['Polarity'].apply(getAnalysis)
+            
+            # save to mongodb
+            db = mongo[f'{ctx.channel.id}']
+            db.Iris.insert_many(combined_df.to_dict("records"))
             
             await ctx.followup.send(f'Elapsed time for {len(messages)} items: {elapsed_time}')
     except Exception as e:
@@ -329,10 +120,10 @@ async def log_channel(ctx):
 async def channel_stats(ctx, user: discord.Member = None):
     await ctx.response.defer()
     
-    if os.path.isfile(f'{ctx.channel.id}.csv'):
+    if f'{ctx.channel.id}' in mongo.list_database_names():
         if user == None:
-            combined_df = pd.read_csv(f'{ctx.channel.id}.csv')
-            combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_convert('US/Eastern')
+            combined_df = pd.DataFrame(list(mongo[f'{ctx.channel.id}'].Iris.find()))
+            combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_localize('UTC').dt.tz_convert('US/Eastern')
             
             total_messages_sent = len(combined_df.index)
             total_characters_sent = int(combined_df['ContentsLength'].sum())
@@ -360,8 +151,8 @@ async def channel_stats(ctx, user: discord.Member = None):
             os.remove(f'plot-{ctx.channel.id}-weekly.png')
             os.remove(f'plot-{ctx.channel.id}-hourly.png')
         else:
-            combined_df = pd.read_csv(f'{ctx.channel.id}.csv')
-            combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_convert('US/Eastern')
+            combined_df = pd.DataFrame(list(mongo[f'{ctx.channel.id}'].Iris.find()))
+            combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_localize('UTC').dt.tz_convert('US/Eastern')
             filtered_df = combined_df.loc[combined_df['Author'] == user.id]
             
             total_messages_sent = len(filtered_df.index)
@@ -391,11 +182,10 @@ async def channel_stats(ctx, user: discord.Member = None):
 async def profanity_stats(ctx, user: discord.Member = None):
     await ctx.response.defer()
     try:
-        if os.path.isfile(f'{ctx.channel.id}.csv'):
+        if f'{ctx.channel.id}' in mongo.list_database_names():
             if user == None:
-                combined_df = pd.read_csv(f'{ctx.channel.id}.csv')
-                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_convert('US/Eastern')
-                combined_df['Cleaned'] = combined_df['Contents'].apply(lambda x: preprocess_text(x, remove_stopwords=True))
+                combined_df = pd.DataFrame(list(mongo[f'{ctx.channel.id}'].Iris.find()))
+                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_localize('UTC').dt.tz_convert('US/Eastern')
                 profane_words_matches = combined_df['Cleaned'].str.extract(profane_words_regex)
                 profane_words_matches = profane_words_matches[profane_words_matches.values != np.NaN].value_counts()
                 ProfanitiesPage = 0
@@ -413,9 +203,8 @@ async def profanity_stats(ctx, user: discord.Member = None):
                 
                 os.remove(f'plot-{ctx.channel.id}-prof.png')
             else:
-                combined_df = pd.read_csv(f'{ctx.channel.id}.csv')
-                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_convert('US/Eastern')
-                combined_df['Cleaned'] = combined_df['Contents'].apply(lambda x: preprocess_text(x, remove_stopwords=True))
+                combined_df = pd.DataFrame(list(mongo[f'{ctx.channel.id}'].Iris.find()))
+                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_localize('UTC').dt.tz_convert('US/Eastern')
                 filtered_df = combined_df.loc[combined_df['Author'] == user.id]
                 profane_words_matches = filtered_df['Cleaned'].str.extract(profane_words_regex)
                 profane_words_matches = profane_words_matches[profane_words_matches.values != np.NaN].value_counts()
@@ -443,15 +232,12 @@ async def profanity_stats(ctx, user: discord.Member = None):
 async def emotion_stats(ctx, user: discord.Member = None):
     await ctx.response.defer()
     try:
-        if os.path.isfile(f'{ctx.channel.id}.csv'):
+        if f'{ctx.channel.id}' in mongo.list_database_names():
             if user == None:
-                combined_df = pd.read_csv(f'{ctx.channel.id}.csv')
+                combined_df = pd.DataFrame(list(mongo[f'{ctx.channel.id}'].Iris.find()))
                 
                 # clean data
-                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_convert('US/Eastern')
-                combined_df['Cleaned'] = combined_df['Contents'].apply(lambda x: preprocess_text(x, remove_stopwords=True))
-                combined_df['Polarity'] = combined_df['Cleaned'].apply(getPolarity)
-                combined_df['Sentiment'] = combined_df['Polarity'].apply(getAnalysis)
+                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_localize('UTC').dt.tz_convert('US/Eastern')
                 
                 sentiment_over_time_by_month = group_and_transform_data(combined_df, pd.Series(combined_df['Timestamp'].dt.strftime('%Y-%m')), sentiment_table_to_positivity)
                 ax = sentiment_over_time_by_month.plot()
@@ -475,13 +261,10 @@ async def emotion_stats(ctx, user: discord.Member = None):
                 os.remove(f'plot-{ctx.channel.id}-emotions-monthly.png')
                 os.remove(f'plot-{ctx.channel.id}-emotions-weekly.png')
             else:
-                combined_df = pd.read_csv(f'{ctx.channel.id}.csv')
+                combined_df = pd.DataFrame(list(mongo[f'{ctx.channel.id}'].Iris.find()))
                 
-                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_convert('US/Eastern')
-                combined_df['Cleaned'] = combined_df['Contents'].apply(lambda x: preprocess_text(x, remove_stopwords=True))
+                combined_df['Timestamp'] = pd.to_datetime(combined_df['Timestamp'], format='mixed').dt.tz_localize('UTC').dt.tz_convert('US/Eastern')
                 filtered_df = combined_df.loc[combined_df['Author'] == user.id]
-                filtered_df['Polarity'] = filtered_df['Cleaned'].apply(getPolarity)
-                filtered_df['Sentiment'] = filtered_df['Polarity'].apply(getAnalysis)
                 
                 sentiment_over_time_by_month = group_and_transform_data(filtered_df, pd.Series(filtered_df['Timestamp'].dt.strftime('%Y-%m')), sentiment_table_to_positivity)
                 ax = sentiment_over_time_by_month.plot()
@@ -545,6 +328,14 @@ def sentiment_table_to_positivity(df):
   percentages = 100 * counts / counts.sum()
   pos = percentages.get('positive', default=0)
   return pos
+
+def get_mentions_timeseries(df, keyword):
+  keyword = keyword_match_wrapper(keyword)
+  filtered_rows = df[df['Contents'].str.contains(keyword, case=False)]
+  return group_and_transform_data(filtered_rows, pd.Series(filtered_rows['Timestamp'].dt.year), lambda df: len(df.index))
+
+def keyword_match_wrapper(keyword: str) -> str:
+  return f'(?<![a-zA-Z0-9]){keyword}(?![a-zA-Z0-9])'
     
 async def get_message_list_from_iterator_async(iterator):
     return [item async for item in iterator if len(item.content) > 0]
@@ -591,16 +382,32 @@ def load_messages_to_df(ctx):
     
     return messages, elapsed_time, contents, df
 
+@client.event
+async def on_ready():
+    print('------')
+    print(f'Logged in as {client.user.name}')
+    print(client.user.id)
+    print(f'In {len(client.guilds)} servers')
+    print('------')
+    
+    await client.change_presence(activity=None)
+    
 async def change_status():
     await client.wait_until_ready()
     while not client.is_closed():
         await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f'to {len(client.guilds)} servers'))   
         await asyncio.sleep(10)
 
-def main():
+async def load():
+    for filename in os.listdir('./cogs'):
+        if filename.endswith('.py'):
+            client.load_extension(f'cogs.{filename[:-3]}')
+
+async def main():
+    await load()
     client.loop.create_task(change_status())
-    client.run('MTA4Mzk0NjUzNjM3NzAwODI0MQ.GGTbtE.HabQRQ7-M7vApG-F01yXba489aKbhZhPrZOGH0')
+    client.run(TOKEN)
 
 
 if __name__ == '__main__':
-  main()
+    asyncio.run(main())

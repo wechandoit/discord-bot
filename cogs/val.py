@@ -5,7 +5,6 @@ from nextcord import application_command as app_commands
 
 # web scraping
 from aiohttp import request
-import requests
 
 async def setup(client: commands.Bot):
     client.add_cog(val(client))
@@ -19,7 +18,7 @@ class val(commands.Cog):
         await interaction.response.defer()
         await interaction.followup.send("Test")
     
-    @app_commands.slash_command(description='Get valorant stats on a player')
+    @app_commands.slash_command(name='val_stats', description='Get valorant stats on a player')
     async def val_stats(self, interaction: discord.Interaction, player):
         await interaction.response.defer()
     
@@ -67,7 +66,7 @@ class val(commands.Cog):
                 embed.set_thumbnail(url=f'{card_pfp_url}')
                 await interaction.followup.send(embed=embed)
                 
-    @app_commands.slash_command(description='Get a valorant players mmr history')
+    @app_commands.slash_command(name='mmr_history', description='Get a valorant players mmr history')
     async def mmr_history(self, interaction: discord.Interaction, player):
     
         await interaction.response.defer()

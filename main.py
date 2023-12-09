@@ -38,7 +38,7 @@ async def on_ready():
 async def change_status():
     await client.wait_until_ready()
     while not client.is_closed():
-        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f'to {len(client.guilds)} servers'))   
+        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f' {len(client.guilds)} servers'))   
         await asyncio.sleep(10)
 
 async def load():

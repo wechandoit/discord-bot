@@ -33,6 +33,10 @@ import re
 import nltk
 from nltk.corpus import stopwords
 
+# data analysis
+from collections import Counter
+from sklearn.feature_extraction.text import CountVectorizer
+
 # sentiment analysis
 from textblob import TextBlob
 
@@ -40,18 +44,18 @@ nest_asyncio.apply()
 sns.set_theme()
 load_dotenv()
 
-#nltk.download('punkt')
-#nltk.download('stopwords')
+PROFANE_WORDS_URL = 'https://raw.githubusercontent.com/zacanger/profane-words/master/words.json'
+profane_words = requests.get(PROFANE_WORDS_URL).json()
+profane_words_regex = f'(?<![a-zA-Z0-9])({"|".join(profane_words)})(?![a-zA-Z0-9])'
+
+mention_regex = '<@(\d+)>'
+
 stopwords.words("english")[:10] # <-- import the english stopwords  
 
 async def setup(client: commands.Bot):
     client.add_cog(messages(client))
 
 class messages(commands.Cog):
-    
-    PROFANE_WORDS_URL = 'https://raw.githubusercontent.com/zacanger/profane-words/master/words.json'
-    profane_words = requests.get(PROFANE_WORDS_URL).json()
-    profane_words_regex = f'(?<![a-zA-Z0-9])({"|".join(profane_words)})(?![a-zA-Z0-9])'
     
     def __init__(self, client: commands.Bot):
         self.client = client
@@ -61,7 +65,70 @@ class messages(commands.Cog):
             self.mongo.admin.command('ping')
             print("Pinged your deployment. You successfully connected to MongoDB!")
         except Exception as e:
-            print(e)     
+            print(e)
+            
+    # @title Start Wrapped '23 commands
+    
+    @app_commands.slash_command(name='my_wrapped', description='Get your server wrapped for 2023!')
+    async def get_wrapped(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        if f'{interaction.channel.id}' in self.mongo.list_database_names():
+            db = self.mongo[f'{interaction.channel.id}']
+            if 'Wrapped' in db.list_collection_names():
+                lookup_user_id = str(interaction.user.id)
+                df = pd.DataFrame(list(db.Wrapped.find()))
+                desc = ''
+                
+                user_dfs = {}
+                for author in df['Author'].unique():
+                    user_filtered_df = df.loc[df['Author'] == author]
+                    user_dfs[str(author)] = user_filtered_df
+                    
+                # data analysis for the wrapped
+                lookup_df = user_dfs[lookup_user_id]
+                
+                # top 5 used words
+                most_used_word_dict = get_most_used_word_dict(lookup_df)
+                
+                top_n_words = sorted(most_used_word_dict, key=most_used_word_dict.get, reverse=True)[:5] # get top 5 words
+                desc += '-'*40 + '\n'
+                desc += get_top_n_words_formatted(df, user_dfs, top_n_words, most_used_word_dict, 'Top Word:', lookup_user_id, 5)
+                    
+                # top 5 used profanity
+                
+                user_profane_words_matches = lookup_df['Cleaned'].str.extract(profane_words_regex)
+                user_profane_words_matches = user_profane_words_matches[user_profane_words_matches.values != np.NaN].value_counts().sort_values(ascending=False).to_frame().to_dict()
+                user_profane_dict = user_profane_words_matches['count']
+                top_n_words = [''.join(item) for item in sorted(user_profane_dict, key=user_profane_dict.get, reverse=True)[:5]]
+                
+                desc += '-'*40 + '\n'
+                desc += get_top_n_words_formatted(df, user_dfs, top_n_words, most_used_word_dict, 'Top Profanity Word:', lookup_user_id, 5) # get top 5 profanity words
+                
+                # top 5 emotions
+                emotion_messages = lookup_df['Emotion'][lookup_df['Emotion'] != 'neutral']
+                user_emotion_data = emotion_messages.value_counts().sort_values(ascending=False).to_frame().to_dict()['count']
+                top_n_emotions = [''.join(item) for item in sorted(user_emotion_data, key=user_emotion_data.get, reverse=True)[:5]]
+                desc += '-'*40 + '\n'
+                desc += f'Top Emotion: {top_n_emotions[0]} ({user_emotion_data[top_n_emotions[0]]} messages)\n'
+                for i in range(1,5):
+                    desc += f'{i+1}: {top_n_emotions[i]} ({user_emotion_data[top_n_emotions[i]]} messages)\n'
+                
+                # overall message count
+                total_messages_sent = len(df.index)
+                user_messages_sent = len(lookup_df.index)
+                desc += '-'*40 + '\n'
+                desc += f'You sent {user_messages_sent/total_messages_sent:.00%} of the messages in this channel\n'
+                desc += f'You used {len(most_used_word_dict)} unique words last year!\n' # number of unique words
+                
+                embed=discord.Embed(title='Your 2023 Stats', description=desc, color=0x36ecc8)
+                embed.set_author(name=f"@{interaction.user.name}'s #{interaction.channel.name} Wrapped", icon_url=interaction.user.avatar.url)
+                embed.title
+                
+                await interaction.followup.send(embed=embed)
+            else:
+                await interaction.followup.send('This channel does not support this command! Please contact @wechandoit on discord if you think this is a mistake. He has to generate the data for these manually :<')
+    
+    # end Wrapped '23 commands     
         
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -373,3 +440,36 @@ def load_messages_to_df(ctx):
         })
         
         return messages, elapsed_time, contents, df
+
+def get_top_n_words_formatted(df, user_dfs, top_n_words, most_used_word_dict, header, lookup_user_id, n):
+    lookup_user_word_usage = [0, 0, 0, 0, 0]
+    other_users_word_usage = [0, 0, 0, 0, 0]
+    string = ''
+    for i in range(n):
+        for author in df['Author'].unique():
+            if str(author) != lookup_user_id:
+                other_df = user_dfs[str(author)]
+                other_most_used_word_dict = get_most_used_word_dict(other_df)
+                if top_n_words[i] in other_most_used_word_dict:
+                    other_users_word_usage[i] += other_most_used_word_dict[top_n_words[i]]
+            else:
+                lookup_user_word_usage[i] = most_used_word_dict[top_n_words[i]]
+    
+    user_uses = lookup_user_word_usage[0]/(lookup_user_word_usage[0]+other_users_word_usage[0])
+    string += f'{header} "{top_n_words[0]}" ({lookup_user_word_usage[0]} times used, {user_uses:.00%} of all uses)\n'
+    for i in range(1,n):
+        user_uses = lookup_user_word_usage[i]/(lookup_user_word_usage[i]+other_users_word_usage[i])
+        string += f'{i+1}: "{top_n_words[i]}" ({lookup_user_word_usage[i]} times used, {user_uses:.00%} of all uses)\n'
+
+    return string
+
+def get_most_used_word_dict(df):
+    try:
+        vectorizer = CountVectorizer()
+        X = vectorizer.fit_transform(df['Contents'])
+        feature_names = vectorizer.get_feature_names_out()
+        word_counts = X.sum(axis=0)
+        word_count_dict = dict(zip(feature_names, word_counts.tolist()[0]))
+        return word_count_dict
+    except:
+        return {}

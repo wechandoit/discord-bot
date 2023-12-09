@@ -39,7 +39,7 @@ class val(commands.Cog):
                     has_card = False
                 
                 print(player, region)
-            if response.status == 404:
+            elif response.status == 404:
                 print((f'Error 404: Player {player} does not exist'))
                 await interaction.followup.send(f'Error: Player {player} does not exist!')
                 return
@@ -126,10 +126,8 @@ class val(commands.Cog):
         player_tag = player.split('#')[1]
         region, card_pfp_url = '', ''
         player_puuid = None
-        account_level = 0
 
         has_card = True
-        is_ranked = True
 
         account_data_url = f'https://api.henrikdev.xyz/valorant/v1/account/{player_name}/{player_tag}'
         async with request('GET', account_data_url, headers={}) as response:
@@ -137,38 +135,40 @@ class val(commands.Cog):
                 data = await response.json()
                 data = data['data']
                 
-                region = data['region'].lower()
+                region = data['region'].upper()
                 player_puuid = data['puuid']
-                account_level = int(data['account_level'])
                 if 'card' in data:
                     card_pfp_url = data['card']['small']
                 else:
                     has_card = False
                 
                 print(player, region)
-            if response.status == 404:
+            elif response.status == 404:
                 print((f'Error 404: Player {player} does not exist'))
                 await interaction.followup.send(f'Error: Player {player} does not exist!')
                 return
             else:
                 print(f"MATCH HIST CMD 1: Error getting account info for {player}, error code {response.status}")
         
-        mmr_data_url = f'https://api.henrikdev.xyz/valorant/v3/matches/na/{player_name}/{player_tag}'
+        mmr_data_url = f'https://api.henrikdev.xyz/valorant/v1/lifetime/matches/{region}/{player_name}/{player_tag}'
         async with request('GET', mmr_data_url, headers={}) as response:
             if response.status == 200:
                 data = await response.json()
                 data = data['data']
-                match_count = len(data)
+                match_count = min(10, len(data))
 
                 # format match/player data
                 map_list = []
 
-                for match in data:
-                    m = val_map(match['metadata']['map'], match['metadata']['mode'], str(match['teams']['red']['rounds_won']) + "-" + str(match['teams']['red']['rounds_lost']), str(match['teams']['blue']['rounds_won']) + "-" + str(match['teams']['blue']['rounds_lost']))
-                    for p in match['players']['all_players']:
-                        team = p['team']
-                        match_player = val_player(p['name'], p['tag'], p['puuid'], p['character'], p['currenttier_patched'], p['stats']['kills'], p['stats']['deaths'], p['stats']['assists'], team)
-                        m.add_player(match_player, team, player_puuid)
+                for i in range(match_count):
+                    match = data[i]
+                    m = val_map(match['meta']['map']['name'], match['meta']['mode'], str(match['teams']['red']) + "-" + str(match['teams']['blue']), str(match['teams']['blue']) + "-" + str(match['teams']['red']))
+
+                    stats = match['stats']
+                    team = stats['team']
+
+                    match_player = val_player(player_name, player_tag, stats['puuid'], stats['character']['name'], stats['kills'], stats['deaths'], stats['assists'], team)
+                    m.add_player(match_player, team, player_puuid)
                     map_list.append(m)
 
                 # turn the data into a discord embed
@@ -178,7 +178,7 @@ class val(commands.Cog):
                 
                 embed=discord.Embed(description=desc)
 
-                embed.set_author(name=f'{player} ({region}) LAST {match_count} GAMES')
+                embed.set_author(name=f'{player} ({region}) | LAST {match_count} GAMES')
 
                 if has_card:
                         embed.set_thumbnail(url=f'{card_pfp_url}')
@@ -188,12 +188,11 @@ class val(commands.Cog):
                 print(f"MATCH HIST CMD 2: Error getting account info for {player}, error code {response.status}")
 
 class val_player():
-    def __init__(self, name, tag, puuid, character, rank, kills, deaths, assists, team):
+    def __init__(self, name, tag, puuid, character, kills, deaths, assists, team):
         self.name = name
         self.tag = tag
         self.puuid = puuid
         self.character = character
-        self.rank = rank
         self.kills = kills
         self.deaths = deaths
         self.assists = assists
@@ -251,14 +250,5 @@ class val_map():
         else:
             string = f'**{self.map} | {self.gamemode}**\n'
             string += f' - {self.lookup_player.character} (KDA: {self.lookup_player.kda_string})\n'
-
-        '''
-        string += 'Red Team:\n'
-        for p in self.red_players:
-            string += f'{p.get_full_tag()} ({p.rank}) | {p.character}: {p.kda_string}\n'
-        string += '\nBlue Team:\n'
-        for p in self.blue_players:
-            string += f'{p.get_full_tag()} ({p.rank}) | {p.character}: {p.kda_string}\n'
-        '''
         return string
 

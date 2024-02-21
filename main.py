@@ -31,6 +31,7 @@ async def on_ready():
     print(f'Logged in as {client.user.name}')
     print(client.user.id)
     print(f'In {len(client.guilds)} servers')
+    print(f'{[guild.name for guild in client.guilds]}')
     print('------')
     
     await client.change_presence(activity=None)
@@ -38,7 +39,7 @@ async def on_ready():
 async def change_status():
     await client.wait_until_ready()
     while not client.is_closed():
-        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f' {len(client.guilds)} servers'))   
+        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f' {len(client.guilds)} servers'), status=discord.Status.dnd)   
         await asyncio.sleep(10)
 
 async def load():
